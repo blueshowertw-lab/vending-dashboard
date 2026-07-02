@@ -147,18 +147,29 @@ async function loadAll() {
     const nameMap = {};
     (nameRes.machine || []).forEach(m => { nameMap[m.code] = m.name; });
 
+    // ★ 修改區：改用 /MachineCommodityCompany.aspx 批次取得所有設備即時庫存，移除 code 參數
+    let rtMap = {};
+    try {
+      const rtResAll = await callAPI("/MachineCommodityCompany.aspx", { company });
+      (rtResAll.machine || []).forEach(m => {
+        rtMap[m.code] = m.commodity || [];
+      });
+    } catch(e) {
+      console.warn("Failed to fetch realtime inventory from batch API", e);
+    }
+
+    // 各設備可銷售庫存（仍維持原個別呼叫）
     await Promise.all(G.devices.map(async code => {
       try {
-        const [rtRes, slRes] = await Promise.allSettled([
-          callAPI("/MachineCommodity.aspx", { code, company }),
-          callAPI("/OrderMachineCommodity.aspx", { code, company }),
-        ]);
+        const slRes = await callAPI("/OrderMachineCommodity.aspx", { code, company });
         G.inventoryMap[code] = {
           name: nameMap[code] || code,
-          realtime: rtRes.status==="fulfilled" ? (rtRes.value.commodity||[]) : [],
-          sellable:  slRes.status==="fulfilled" ? (slRes.value.commodity||[]) : [],
+          realtime: rtMap[code] || [],
+          sellable: slRes.commodity || [],
         };
-      } catch { G.inventoryMap[code] = { name: nameMap[code]||code, realtime:[], sellable:[] }; }
+      } catch {
+        G.inventoryMap[code] = { name: nameMap[code]||code, realtime: rtMap[code] || [], sellable: [] };
+      }
     }));
 
     const orderRes = await callAPI("/OrderList.aspx", { begin, company, end, future: 1 });
